@@ -2,21 +2,6 @@
 
 This Terraform module creates a **Network Load Balancer (NLB)** that acts as a reverse proxy to an **AWS RDS** instance. It is particularly useful when you want to expose a database endpoint to clients (for example, an on-premises environment or developer workstations) without directly exposing the native RDS endpoint. Instead, traffic flows through a secure network load balancer.
 
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture Diagram](#architecture-diagram)
-- [Usage](#usage)
-- [Inputs](#inputs)
-- [Outputs](#outputs)
-- [Examples](#examples)
-- [License](#license)
-
----
-
 ## Overview
 
 By default, an RDS instance is accessible only within a private subnet or via restricted public access (if configured). This module sets up:
@@ -26,41 +11,17 @@ By default, an RDS instance is accessible only within a private subnet or via re
 - A **Target Group** that forwards traffic to the RDS instance’s IP or DNS address.
 - (Optionally) **Security Group Ingress Rules** that restrict inbound traffic to specific CIDRs you provide.
 
----
-
 ## Diagram
 
-```
-   [Allowed CIDRs]
-         |
-   (Internet traffic)
-         |
-   +-------------------------+
-   |  Network Load Balancer |
-   |    (public subnets)    |
-   +----------+-------------+
-              |
-          (TCP 5432)
-              |
-    +-----------------------+
-    |  RDS DB Instance     |
-    |  (private subnets)   |
-    +-----------------------+
-```
-
-1. **Inbound** traffic arrives on the NLB from specific CIDRs.  
-2. NLB **forwards** traffic to the RDS instance using the DB’s endpoint (IP or DNS).  
-3. Security Group rules **restrict** access to only the ports and CIDRs you specify.
-
----
+![AWS RDS Reverse Proxy Diagram](./assets/aws-rds-reverse-proxy.drawio.svg)
 
 ## Usage
 
-Below is a **basic** usage example. Refer to the [./examples](examples) for a more complete Terraform setup with a VPC, RDS instance, and this module.
+Below is a **basic** usage example. Refer to the [examples](examples) for a more complete Terraform setup with a VPC, RDS instance, and this module.
 
 ```hcl
 module "nlb_reverse_proxy" {
-  source = "git::https://github.com/your-org/terraform-aws-nlb-reverse-proxy.git"
+  source = "git::https://github.com/vicyap/terraform-aws-nlb-reverse-proxy.git"
 
   name                          = "my-rds-reverse-proxy"
   public_subnet_ids             = ["subnet-0123456789abcdef0", "subnet-123456789abcdef01"]
@@ -69,6 +30,11 @@ module "nlb_reverse_proxy" {
   additional_security_group_ids = ["sg-0123456789abcdef0"]
 }
 ```
+
+### CloudFormation Template
+
+Alternatively, there is a CloudFormation Template under [templates](./templates).
+
 ## Requirements
 
 | Name | Version |
