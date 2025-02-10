@@ -2,6 +2,8 @@
 
 This Terraform module creates a **Network Load Balancer (NLB)** that acts as a reverse proxy to an **AWS RDS** instance. It is particularly useful when you want to expose a database endpoint to clients (for example, an on-premises environment or developer workstations) without directly exposing the native RDS endpoint. Instead, traffic flows through a secure network load balancer.
 
+Related Blog Post: https://vicyap.com/blog/posts/aws-rds-reverse-proxy
+
 ## Overview
 
 By default, an RDS instance is accessible only within a private subnet or via restricted public access (if configured). This module sets up:
