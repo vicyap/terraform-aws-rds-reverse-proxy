@@ -32,6 +32,35 @@ module "vpc" {
   enable_nat_gateway     = false
 }
 
+# Create a security group that attach to both the RDS instance and the NLB
+# This security group allows inbound traffic from the NLB to the RDS instance
+module "security_group" {
+  source  = "terraform-aws-modules/security-group/aws"
+  version = "~> 5.0"
+
+  name        = local.name
+  description = "Security group for NLB reverse proxy to RDS"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress_with_self = [
+    {
+      from_port   = local.db_port
+      to_port     = local.db_port
+      protocol    = "tcp"
+      description = "Allow inbound port traffic from self"
+    }
+  ]
+
+  egress_with_self = [
+    {
+      from_port   = local.db_port
+      to_port     = local.db_port
+      protocol    = "tcp"
+      description = "Allow outbound port traffic to self"
+    }
+  ]
+}
+
 module "rds" {
   source  = "terraform-aws-modules/rds/aws"
   version = "~> 6.0"
@@ -66,41 +95,12 @@ module "rds" {
   apply_immediately   = true
 }
 
-module "security_group" {
-  source  = "terraform-aws-modules/security-group/aws"
-  version = "~> 5.0"
-
-  name        = local.name
-  description = "Security group for NLB reverse proxy to RDS"
-  vpc_id      = module.vpc.vpc_id
-
-  ingress_with_self = [
-    {
-      from_port   = local.db_port
-      to_port     = local.db_port
-      protocol    = "tcp"
-      description = "Allow inbound port traffic from self"
-    }
-  ]
-
-  egress_with_self = [
-    {
-      from_port   = local.db_port
-      to_port     = local.db_port
-      protocol    = "tcp"
-      description = "Allow outbound port traffic to self"
-    }
-  ]
-}
-
 module "nlb_reverse_proxy" {
-  source = "../"
+  source = "../../"
 
   name                          = local.name
-  vpc_id                        = module.vpc.vpc_id
   public_subnet_ids             = module.vpc.public_subnets
-  allowed_cidrs                 = [local.my_ip_address_cidr]
   db_instance_identifier        = module.rds.db_instance_identifier
-  db_port                       = local.db_port
+  allowed_cidrs                 = [local.my_ip_address_cidr]
   additional_security_group_ids = [module.security_group.security_group_id]
 }
