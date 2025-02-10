@@ -1,0 +1,186 @@
+# ------------------------------------------------------------------------------
+# Description:
+#   This CloudFormation template sets up a reverse proxy for an RDS instance using 
+#   a Network Load Balancer (NLB). It creates and configures:
+#     - A Security Group for the NLB.
+#     - A Network Load Balancer (with specified subnets).
+#     - A Target Group pointing to the specified RDS IP and port.
+#     - A Listener to route traffic to the Target Group.
+#   It also provides outputs such as the NLB’s DNS name and ARNs for further usage.
+#
+# Example Usage:
+#
+# set the stack name
+# STACK_NAME="MyReverseProxyStack"
+#
+# create a new stack
+#
+# aws cloudformation create-stack \
+#   --stack-name "$STACK_NAME" \
+#   --template-body file://rds-reverse-proxy.yaml \
+#   --parameters ParameterKey=Name,ParameterValue=MyReverseProxy \
+#                ParameterKey=VpcId,ParameterValue=vpc-123abc \
+#                ParameterKey=PublicSubnetIds,ParameterValue='subnet-abc123,subnet-def456' \
+#                ParameterKey=DBIPAddress,ParameterValue=10.0.1.123 \
+#                ParameterKey=AllowedCidrs,ParameterValue='0.0.0.0/0' \
+#                ParameterKey=AdditionalSecurityGroupId,ParameterValue=sg-00xyz \
+#   --capabilities CAPABILITY_NAMED_IAM
+#
+# wait for the stack to finish creating
+#
+# aws cloudformation wait stack-create-complete \
+#   --stack-name "$STACK_NAME"
+#
+# get the DNS name of the NLB
+#
+# NLB_DNS_NAME=$(aws cloudformation describe-stacks \
+#   --stack-name "$STACK_NAME" \
+#   --query "Stacks[0].Outputs[?OutputKey=='NLBDnsName'].OutputValue" \
+#   --output text)
+# echo "NLB DNS Name: $NLB_DNS_NAME"
+#
+# test the connection
+#
+# psql "postgresql://postgres:password@$NLB_DNS_NAME"
+#
+# destroy the stack
+#
+# aws cloudformation delete-stack \
+#   --stack-name "$STACK_NAME"
+# ------------------------------------------------------------------------------
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::LanguageExtensions
+
+Description: |
+  CloudFormation template that creates a Network Load Balancer with a 
+  single TCP listener and target group pointing to an existing RDS instance.
+
+Parameters:
+  AdditionalSecurityGroupId:
+    Type: String
+    Description: |
+      Any additional security group ID to associate with the NLB. You might need
+      to create a Security Group that allows the NLB to connect to the RDS instance
+      and add that Security Group ID here.
+
+  AllowedCidrs:
+    Type: CommaDelimitedList
+    Description: Comma-separated list of CIDR blocks allowed to access the NLB.
+
+  DBIPAddress:
+    Type: String
+    Description: |
+      Private IP Address of the RDS instance to forward traffic to, a DNS
+      lookup on the DB Endpoint should do.
+      eg. host my-rds-instance.cvsdhdmipfhv.us-west-2.rds.amazonaws.com
+
+  DBPort:
+    Type: Number
+    Description: Port of the RDS instance
+    Default: 5432
+
+  Name:
+    Type: String
+    Description: Name of the Network Load Balancer
+
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of public subnet IDs for the NLB
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where the NLB will be created
+
+Conditions:
+  HasAdditionalSecurityGroup: !Not [!Equals [!Ref AdditionalSecurityGroupId, ""]]
+
+Resources:
+  NLBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for rds reverse proxy network load balancer
+      GroupName: !Sub "${Name}-nlb-sg"
+      VpcId: !Ref VpcId
+  'Fn::ForEach::NLBSecurityGroupIngressRules':
+    - Cidr
+    - !Ref AllowedCidrs
+    - 'NLBSecurityGroupIngress&{Cidr}':
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+          GroupId: !Ref NLBSecurityGroup
+          IpProtocol: tcp
+          FromPort: !Ref DBPort
+          ToPort: !Ref DBPort
+          CidrIp: !Sub ${Cidr}
+          Description: !Sub "Allow traffic from ${Cidr} to the NLB"
+  NLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Ref Name
+      IpAddressType: ipv4
+      SecurityGroups: !If [HasAdditionalSecurityGroup, [!Ref AdditionalSecurityGroupId, !Ref NLBSecurityGroup], [!Ref NLBSecurityGroup]]
+      Subnets: !Ref PublicSubnetIds
+      Type: network
+      Scheme: internet-facing
+  NLBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "db-${Name}"
+      IpAddressType: ipv4
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      Port: !Ref DBPort
+      Targets:
+      - Id: !Ref DBIPAddress
+        Port: !Ref DBPort
+      HealthCheckEnabled: true
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: TCP
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+      HealthCheckTimeoutSeconds: 10
+      HealthCheckIntervalSeconds: 10
+  NLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref NLB
+      Port: !Ref DBPort
+      Protocol: TCP
+      DefaultActions:
+      - Order: 1
+        TargetGroupArn: !Ref NLBTargetGroup
+        Type: "forward"
+        ForwardConfig:
+          TargetGroups:
+          - TargetGroupArn: !Ref NLBTargetGroup
+
+Outputs:
+  NLBId:
+    Description: ID of the created Network Load Balancer (its ARN or name)
+    Value: !Ref NLB
+
+  NLBArn:
+    Description: ARN of the created Network Load Balancer
+    Value: !GetAtt [ NLB, LoadBalancerArn ]
+
+  NLBDnsName:
+    Description: DNS name of the Network Load Balancer
+    Value: !GetAtt [ NLB, DNSName ]
+
+  NLBCanonicalHostedZoneId:
+    Description: Hosted zone ID that you can use to create a Route53 alias record for the NLB
+    Value: !GetAtt [ NLB, CanonicalHostedZoneID ]
+
+  NLBListenerArn:
+    Description: ARN of the NLB listener
+    Value: !Ref NLBListener
+
+  NLBTargetGroupArn:
+    Description: ARN of the target group
+    Value: !Ref NLBTargetGroup
+
+  NLBSecurityGroupId:
+    Description: Security Group ID that includes the inbound rules for DBPort
+    Value: !Ref NLBSecurityGroup
